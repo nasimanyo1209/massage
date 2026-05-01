@@ -1,0 +1,193 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マッサージ券シリアルナンバー管理システム</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden">マッサージ券シリアルナンバー管理システム</h2>
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('generate')">発行</button>
+    <button class="tab" onclick="showTab('check')">確認・使用</button>
+    <button class="tab" onclick="showTab('list')">一覧</button>
+    <button class="tab" onclick="showTab('stats')">統計</button>
+  </div>
+
+  <div id="tab-generate" class="section active">
+    <p class="section-title">シリアルナンバーを発行する</p>
+    <div class="card">
+      <div class="row">
+        <label>コース</label>
+        <span class="type-tag">5分マッサージ券</span>
+      </div>
+      <div class="row">
+        <label>枚数</label>
+        <input type="number" id="gen-count" value="1" min="1" max="50" style="max-width:80px">
+        <span style="font-size:13px;color:var(--color-text-secondary)">枚（最大50枚）</span>
+      </div>
+      <div class="row">
+        <label>有効期限</label>
+        <input type="date" id="gen-expire" style="flex:1">
+        <span style="font-size:12px;color:var(--color-text-secondary)">（空白＝無期限）</span>
+      </div>
+      <button class="btn btn-primary" onclick="generateSerials()" style="width:100%;margin-top:4px">発行する</button>
+    </div>
+    <div id="gen-result"></div>
+  </div>
+
+  <div id="tab-check" class="section">
+    <p class="section-title">番号を確認・使用済みにする</p>
+    <div class="card">
+      <div class="row">
+        <label>番号</label>
+        <input type="text" id="check-input" placeholder="例：MSG-A1B2-C3D4" style="font-family:var(--font-mono);text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="checkSerial()" style="flex:1">確認のみ</button>
+        <button class="btn btn-primary" onclick="useSerial()" style="flex:1">使用済みにする</button>
+      </div>
+      <div id="check-result"></div>
+    </div>
+  </div>
+
+  <div id="tab-list" class="section">
+    <p class="section-title">発行済み一覧</p>
+    <div style="display:flex;gap:8px;margin-bottom:1rem">
+      <select id="filter-status" onchange="renderList()" style="flex:1">
+        <option value="all">すべて</option>
+        <option value="active">有効</option>
+        <option value="used">使用済み</option>
+        <option value="expired">期限切れ</option>
+      </select>
+      <button class="btn" onclick="clearAll()" style="font-size:12px;color:#A32D2D;border-color:#F0959A">全削除</button>
+    </div>
+    <div id="list-container"></div>
+  </div>
+
+  <div id="tab-stats" class="section">
+    <p class="section-title">統計</p>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-num" id="s-total">0</div><div class="stat-label">発行枚数</div></div>
+      <div class="stat"><div class="stat-num" id="s-active" style="color:#3B6D11">0</div><div class="stat-label">有効</div></div>
+      <div class="stat"><div class="stat-num" id="s-used" style="color:#A32D2D">0</div><div class="stat-label">使用済み</div></div>
+      <div class="stat"><div class="stat-num" id="s-expired" style="color:#5F5E5A">0</div><div class="stat-label">期限切れ</div></div>
+    </div>
+    <div class="card" style="font-size:13px;color:var(--color-text-secondary);text-align:center;padding:1rem">
+      すべて「5分マッサージ券」で統一されています
+    </div>
+  </div>
+</div>
+
+<script>
+const TICKET_TYPE = '5分マッサージ券';
+let serials = JSON.parse(localStorage.getItem('massage_serials_5min') || '[]');
+
+function save() { localStorage.setItem('massage_serials_5min', JSON.stringify(serials)); }
+
+function randChar() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return chars[Math.floor(Math.random() * chars.length)];
+}
+
+function genCode() {
+  const a = Array.from({length:4}, randChar).join('');
+  const b = Array.from({length:4}, randChar).join('');
+  return `MSG-${a}-${b}`;
+}
+
+function getStatus(s) {
+  if (s.used) return 'used';
+  if (s.expire && new Date(s.expire) < new Date()) return 'expired';
+  return 'active';
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['generate','check','list','stats'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name === 'list') renderList();
+  if (name === 'stats') renderStats();
+}
+
+function generateSerials() {
+  const count = Math.min(50, Math.max(1, parseInt(document.getElementById('gen-count').value) || 1));
+  const expire = document.getElementById('gen-expire').value || null;
+  const newSerials = [];
+  for (let i = 0; i < count; i++) {
+    let code;
+    do { code = genCode(); } while (serials.find(s => s.code === code));
+    newSerials.push({ code, type: TICKET_TYPE, expire, used: false, usedDate: null, createdAt: new Date().toISOString().slice(0,10) });
+  }
+  serials = [...serials, ...newSerials];
+  save();
+  document.getElementById('gen-result').innerHTML = `<div class="card"><p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px">${TICKET_TYPE} × ${count}枚を発行しました</p><div class="serial-grid">${newSerials.map(s => `<div class="serial-item"><div class="serial-code">${s.code}</div><span class="badge badge-active">有効</span>${s.expire ? `<div class="serial-date">期限: ${s.expire}</div>` : ''}</div>`).join('')}</div></div>`;
+}
+
+function findSerial(code) {
+  return serials.find(s => s.code === code.trim().toUpperCase());
+}
+
+function statusLabel(s) {
+  const st = getStatus(s);
+  if (st === 'used') return `<span class="badge badge-used">使用済み</span>${s.usedDate ? ` <span style="font-size:12px;color:var(--color-text-secondary)">${s.usedDate}</span>` : ''}`;
+  if (st === 'expired') return `<span class="badge badge-expired">期限切れ</span>`;
+  return `<span class="badge badge-active">有効</span>`;
+}
+
+function checkSerial() {
+  const code = document.getElementById('check-input').value;
+  const s = findSerial(code);
+  const el = document.getElementById('check-result');
+  if (!s) { el.innerHTML = `<div class="check-result check-ng">このシリアルナンバーは登録されていません</div>`; return; }
+  const st = getStatus(s);
+  el.innerHTML = `<div class="check-result ${st === 'active' ? 'check-ok' : 'check-ng'}"><div style="font-weight:500;margin-bottom:4px">${s.type}</div><div>状態: ${statusLabel(s)}</div>${s.expire ? `<div style="margin-top:4px;font-size:12px">有効期限: ${s.expire}</div>` : ''}</div>`;
+}
+
+function useSerial() {
+  const code = document.getElementById('check-input').value;
+  const s = findSerial(code);
+  const el = document.getElementById('check-result');
+  if (!s) { el.innerHTML = `<div class="check-result check-ng">このシリアルナンバーは登録されていません</div>`; return; }
+  const st = getStatus(s);
+  if (st === 'used') { el.innerHTML = `<div class="check-result check-ng">このチケットはすでに使用済みです（${s.usedDate}）</div>`; return; }
+  if (st === 'expired') { el.innerHTML = `<div class="check-result check-ng">このチケットは期限切れです</div>`; return; }
+  s.used = true;
+  s.usedDate = new Date().toISOString().slice(0,10);
+  save();
+  el.innerHTML = `<div class="check-result check-ok"><div style="font-weight:500;margin-bottom:4px">${s.type} — 使用済みに更新しました</div><div style="font-size:12px">使用日: ${s.usedDate}</div></div>`;
+}
+
+function renderList() {
+  const filter = document.getElementById('filter-status').value;
+  const filtered = serials.filter(s => filter === 'all' || getStatus(s) === filter);
+  const el = document.getElementById('list-container');
+  if (!filtered.length) { el.innerHTML = `<div class="empty">該当するチケットがありません</div>`; return; }
+  el.innerHTML = `<div class="serial-grid">${filtered.map(s => `<div class="serial-item"><div class="serial-code">${s.code}</div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">${s.type}</div>${statusLabel(s)}${s.expire ? `<div class="serial-date">期限: ${s.expire}</div>` : ''}${getStatus(s) === 'active' ? `<button class="use-btn" onclick="quickUse('${s.code}')">使用済みにする</button>` : ''}</div>`).join('')}</div>`;
+}
+
+function quickUse(code) {
+  const s = findSerial(code);
+  if (!s) return;
+  s.used = true;
+  s.usedDate = new Date().toISOString().slice(0,10);
+  save();
+  renderList();
+  renderStats();
+}
+
+function renderStats() {
+  document.getElementById('s-total').textContent = serials.length;
+  document.getElementById('s-active').textContent = serials.filter(s => getStatus(s) === 'active').length;
+  document.getElementById('s-used').textContent = serials.filter(s => getStatus(s) === 'used').length;
+  document.getElementById('s-expired').textContent = serials.filter(s => getStatus(s) === 'expired').length;
+}
+</script>
+</body>
+</html>
